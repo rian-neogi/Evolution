@@ -1,4 +1,7 @@
+#pragma once
+
 #include "Environment.h"
+#include "AtariGame.h"
 
 class SupervisedEnvironment : public Environment
 {

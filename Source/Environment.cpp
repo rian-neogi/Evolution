@@ -1,67 +1,40 @@
 #include "Environment.h"
 
-Environment::Environment() : mGame(NULL), mPopulation(NULL), mPopulationSize(0)
-{
+Environment::Environment() : mGame(nullptr), mPopulation(nullptr), mPopulationSize(0) {}
 
+Environment::Environment(Game* game, Genotype* pop, int pop_size) : Environment()
+{
+    init(game, pop, pop_size);
 }
 
-Environment::Environment(AtariGame* game, Genotype* pop, int pop_size) : mGame(game), mPopulation(pop), mPopulationSize(pop_size)
-{
-	init(game, pop, pop_size);
-}
+Environment::~Environment() {}
 
-Environment::~Environment()
+void Environment::init(Game* game, Genotype* pop, int pop_size)
 {
-	// delete mGame;
-}
-
-void Environment::init(AtariGame* game, Genotype* pop, int pop_size)
-{
-	mGame = game;
-	mPopulation = pop;
-	mPopulationSize = pop_size;
-
-	// mPopulation = new Genotype[mPopulationSize];
-	int REG_SIZE = 8;
-	int INPUT_SIZE = mGame->getStateSize();
-	mExe.mRegisters = new int[REG_SIZE];
-	mExe.mRegisterSize = REG_SIZE;
-	mExe.mInputSize = INPUT_SIZE;
-	mExe.mInputs = mGame->mALE->getRAM().array();
-	mExe.reset();
+    mGame = game;
+    mPopulation = pop;
+    mPopulationSize = pop_size;
+    // Keep the legacy ownership convention: callers own the interpreter's buffers.
+    if (!mExe.mRegisters)
+        mExe.mRegisters = new int[8];
+    mExe.mRegisterSize = 8;
+    mExe.mInputSize = mGame->getStateSize();
+    mExe.mInputs = mGame->getState();
+    mExe.reset();
 }
 
 int Environment::getFitness(int indi)
 {
-	mGame->restart();
-	// game.resetState();
-	mExe.reset();
-	// exe.mInputs = game.mALE->getRAM().array();
-	// exe.mInputSize = game.mALE->getRAM().size();
-	int totalReward = 0;
-	int score_count = 0;
-	int currReward = 0;
-	// indi->print();
-	while (!mGame->is_over() && mGame->mFrames <= 10000)
-	{
-		// printf("Frame: %d\n", mGame->mFrames);
-		// totalReward += mGame->mALE->act(PLAYER_A_FIRE);
-		mExe.reset();
-
-		mExe.run_code(&mPopulation[indi], 0);
-
-		ActionVect vect = mGame->mALE->getMinimalActionSet();
-		int size = vect.size();
-		currReward = mGame->do_action(mExe.mRegisters[0] % size);
-		totalReward += currReward;
-		// if(currReward!=0)
-		// {
-		// 	score_count += 1;
-		// 	if(score_count >= 20)
-		// 	{
-		// 		break;
-		// 	}
-		// }
-	}
-	return totalReward;
+    mGame->restart();
+    int totalReward = 0;
+    const int actions = mGame->getActionCount();
+    for (int frame = 0; frame < mMaxFrames && !mGame->is_over(); ++frame)
+    {
+        mExe.reset();
+        mExe.mInputs = mGame->getState();
+        mExe.run_code(&mPopulation[indi], 0);
+        const int action = (mExe.mRegisters[0] % actions + actions) % actions;
+        totalReward += mGame->do_action(action);
+    }
+    return totalReward;
 }

@@ -6,10 +6,11 @@
 #include <stdlib.h>
 #include <time.h>
 #include <assert.h>
+#include <limits>
 
 enum MutationType
 {
-    MUT_CLONE, MUT_ADD, MUT_DEL, MUT_CHANGE, MUT_NUM
+    MUT_ADD, MUT_DEL, MUT_CHANGE, MUT_NUM, MUT_CLONE
 };
 
 enum InstructionType
@@ -37,11 +38,11 @@ struct Instruction
         }
         else if(x==1)
         {
-            arg1++;
+            if (arg1 < std::numeric_limits<int>::max()) ++arg1;
         }
         else if(x==2)
         {
-            arg2++;
+            if (arg2 < std::numeric_limits<int>::max()) ++arg2;
         }    
         else if(x==3)
         {

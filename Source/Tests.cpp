@@ -1,5 +1,7 @@
 #include "Tests.h"
 
+#include <iostream>
+
 void test_execution()
 {
     int* Register = new int[1000];

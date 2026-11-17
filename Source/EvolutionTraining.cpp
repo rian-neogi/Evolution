@@ -1,5 +1,10 @@
 #include "EvolutionTraining.h"
 
+#include <iostream>
+#include <pthread.h>
+#include <sched.h>
+#include <thread>
+
 void learn_sup()
 {
     const std::string LOAD_FILE = "breakout_best";

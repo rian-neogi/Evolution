@@ -1,111 +1,121 @@
-cmake_minimum_required(VERSION 3.8.2)
-
-project(Evolution)
-
-enable_language(CUDA)
-
-project(Evolution LANGUAGES CXX CUDA)
-set(CUDA_SEPARABLE_COMPILATION ON)
-find_package(CUDA QUIET REQUIRED)
-
-if(NOT DEFINED CMAKE_CUDA_STANDARD)
-    set(CMAKE_CUDA_STANDARD 11)
-    set(CMAKE_CUDA_STANDARD_REQUIRED ON)
-endif()
+cmake_minimum_required(VERSION 3.16)
+project(Evolution LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 11)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
-set(CUDA_NVCC_FLAGS ${CUDA_NVCC_FLAGS}; -O3 -gencode arch=compute_75,code=sm_75)
-
-if(NOT CMAKE_BUILD_TYPE)
-  set(CMAKE_BUILD_TYPE Release)
+if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
+    set(CMAKE_BUILD_TYPE Release CACHE STRING "Build type" FORCE)
 endif()
 
-set(CMAKE_CXX_FLAGS "-Wall -Wextra -pthread")
-set(CMAKE_CXX_FLAGS_DEBUG "-g")
-set(CMAKE_CXX_FLAGS_RELEASE "-g -O3 -funsafe-math-optimizations")
+find_package(Threads REQUIRED)
+find_package(Lua 5.4 REQUIRED)
+option(EVOLUTION_BUILD_VIEWER "Build the SDL2 viewer for the local simulator" ON)
+option(EVOLUTION_BUILD_ALE "Also build the legacy ALE/ROM trainer as EvolutionALE" OFF)
+set(EVOLUTION_RUNTIME_DIR "${CMAKE_CURRENT_SOURCE_DIR}/Bin" CACHE PATH "Directory for Evolution executables")
 
-set(CMAKE_BINARY_DIR ${CMAKE_SOURCE_DIR})
-set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/Lib)
-set(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/Lib)
-set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/Bin)
-# SET(CMAKE_BUILD_TYPE RELEASE)
+add_library(evolution_core STATIC
+    Source/Execution.cpp Source/Game.cpp Source/Gene.cpp Source/Genotype.cpp
+    Source/Rating.cpp Source/WeightedRandom.cpp Source/Environment.cpp Source/TicTacToe.cpp)
+target_include_directories(evolution_core PUBLIC Include ${LUA_INCLUDE_DIR})
+target_link_libraries(evolution_core PUBLIC ${LUA_LIBRARIES} Threads::Threads)
+target_compile_options(evolution_core PRIVATE -Wall -Wextra)
 
-# SET(PROJECT_SOURCE_DIR ${CMAKE_SOURCE_DIR}/Source)
+add_library(invaders STATIC Source/SpaceInvaders.cpp Source/LocalTraining.cpp Source/CnnAgent.cpp Source/CnnEs.cpp)
+target_link_libraries(invaders PUBLIC evolution_core)
+target_compile_options(invaders PRIVATE -Wall -Wextra)
 
+option(EVOLUTION_USE_DNNL "Use oneDNN batched CPU CNN inference when available" ON)
+if(EVOLUTION_USE_DNNL)
+    # Accept runtime-only v3 installations, as found on this laptop.
+    find_library(EVOLUTION_DNNL_LIBRARY NAMES dnnl libdnnl.so.3 libdnnl.so.3.6)
+    find_package(OpenMP QUIET COMPONENTS CXX)
+    if(EVOLUTION_DNNL_LIBRARY AND OpenMP_CXX_FOUND)
+        include(CheckLibraryExists)
+        check_library_exists("${EVOLUTION_DNNL_LIBRARY}" dnnl_memory_desc_create_with_strides "" EVOLUTION_DNNL_V3)
+    endif()
+    if(EVOLUTION_DNNL_LIBRARY AND OpenMP_CXX_FOUND AND EVOLUTION_DNNL_V3)
+        target_compile_definitions(invaders PRIVATE EVOLUTION_HAS_DNNL)
+        target_link_libraries(invaders PUBLIC "${EVOLUTION_DNNL_LIBRARY}" OpenMP::OpenMP_CXX)
+        find_path(EVOLUTION_DNNL_INCLUDE_DIR oneapi/dnnl/dnnl.h)
+        if(EVOLUTION_DNNL_INCLUDE_DIR)
+            target_include_directories(invaders SYSTEM PRIVATE "${EVOLUTION_DNNL_INCLUDE_DIR}")
+            target_compile_definitions(invaders PRIVATE EVOLUTION_DNNL_HEADERS)
+        endif()
+        message(STATUS "CNN backend: oneDNN batched matmul (${EVOLUTION_DNNL_LIBRARY})")
+    else()
+        message(WARNING "oneDNN v3/OpenMP not found; CNN uses portable scalar inference. Install the oneDNN CPU runtime to accelerate it.")
+    endif()
+else()
+    message(STATUS "CNN backend: portable scalar inference")
+endif()
 
-## INCLUDE
-include_directories("Include")
+add_executable(Evolution Source/Main.cpp Source/InvadersViewer.cpp)
+target_link_libraries(Evolution PRIVATE invaders)
+target_compile_options(Evolution PRIVATE -Wall -Wextra)
+set_target_properties(Evolution PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${EVOLUTION_RUNTIME_DIR}")
+if(EVOLUTION_BUILD_VIEWER)
+    find_package(SDL2 QUIET CONFIG)
+    if(SDL2_FOUND)
+        target_compile_definitions(Evolution PRIVATE EVOLUTION_HAS_SDL2)
+        target_link_libraries(Evolution PRIVATE SDL2::SDL2)
+    else()
+        message(STATUS "SDL2 not found: building headless training only")
+    endif()
+endif()
 
-# include_directories("/home/rian/Code/Libraries/OpenBLAS/include")
-# include_directories("/opt/AMDAPPSDK-3.0/include")
-# include_directories("/home/rian/Code/Libraries/clBLAS-2.12.0-Linux-x64/include")
+include(CTest)
+if(BUILD_TESTING)
+    add_executable(invaders_tests Tests/SpaceInvadersTests.cpp)
+    target_link_libraries(invaders_tests PRIVATE invaders)
+    add_test(NAME invaders_simulation COMMAND invaders_tests)
+    add_executable(cnn_tests Tests/CnnTests.cpp)
+    target_link_libraries(cnn_tests PRIVATE invaders)
+    add_test(NAME invaders_cnn COMMAND cnn_tests)
+    add_executable(cnn_es_tests Tests/CnnEsTests.cpp)
+    target_link_libraries(cnn_es_tests PRIVATE invaders)
+    add_test(NAME invaders_cnn_es COMMAND cnn_es_tests)
+    find_package(Python3 QUIET COMPONENTS Interpreter)
+    if(Python3_Interpreter_FOUND)
+        add_test(NAME invaders_training_cli COMMAND "${Python3_EXECUTABLE}"
+            "${CMAKE_CURRENT_SOURCE_DIR}/Tests/TrainingCliTests.py" "$<TARGET_FILE:Evolution>"
+            "$<BOOL:${SDL2_FOUND}>")
+        add_test(NAME invaders_cnn_cli COMMAND "${Python3_EXECUTABLE}"
+            "${CMAKE_CURRENT_SOURCE_DIR}/Tests/CnnCliTests.py" "$<TARGET_FILE:Evolution>"
+            "$<BOOL:${SDL2_FOUND}>")
+        add_test(NAME invaders_cnn_es_cli COMMAND "${Python3_EXECUTABLE}"
+            "${CMAKE_CURRENT_SOURCE_DIR}/Tests/CnnEsCliTests.py" "$<TARGET_FILE:Evolution>"
+            "$<BOOL:${SDL2_FOUND}>")
+    endif()
+endif()
 
-include_directories("/home/rian/Code/Projects/CoreNN/Include")
-include_directories("/home/rian/Code/Libraries/Arcade-Learning-Environment-0.6.0/src")
-
-include_directories("/home/rian/Code/Libraries/OpenBLAS/include")
-include_directories("/opt/cuda/include")
-# include_directories("/libraw/")
-# include_directories("/usr/include/opencv4")
-# include_directories(${OpenCV_INCLUDE_DIRS})
-# include_directories("/opt/AMDAPPSDK-3.0/include")
-# include_directories("/home/rian/Code/Libraries/clBLAS-2.12.0-Linux-x64/include")
-
-
-## LINK
-link_directories("/home/rian/Code/Libraries/OpenBLAS/lib")
-link_directories("/opt/cuda/lib64")
-# link_directories("/opt/AMDAPPSDK-3.0/lib/x86_64/sdk")
-# link_directories("/home/rian/Code/Libraries/clBLAS-2.12.0-Linux-x64/lib64")
-link_directories("/home/rian/Code/Projects/CoreNN/Lib")
-link_directories("/home/rian/Code/Libraries/Arcade-Learning-Environment-0.6.0")
-
-
-## TARGET
-file(GLOB SOURCE_FILES
-    Include/*.h
-    Source/*.cpp
-    /home/rian/Code/Projects/CoreNN/Include/*.h
-    /home/rian/Code/Projects/CoreNN/Include/Neurons/*.h
-    /home/rian/Code/Projects/CoreNN/Include/ErrorFunctions/*.h
-    /home/rian/Code/Projects/CoreNN/Include/Optimizers/*.h
-    /home/rian/Code/Projects/CoreNN/Include/Initializers/*.h
-    /home/rian/Code/Projects/CoreNN/Source/*.cpp
-    /home/rian/Code/Projects/CoreNN/Source/*.cu
-    /home/rian/Code/Projects/CoreNN/Source/Neurons/*.cpp
-    /home/rian/Code/Projects/CoreNN/Source/Neurons/*.cu
-    /home/rian/Code/Projects/CoreNN/Source/ErrorFunctions/*.cpp
-    /home/rian/Code/Projects/CoreNN/Source/ErrorFunctions/*.cu
-    /home/rian/Code/Projects/CoreNN/Source/Optimizers/*.cpp
-    /home/rian/Code/Projects/CoreNN/Source/Optimizers/*.cu
-    /home/rian/Code/Projects/CoreNN/Source/Initializers/*.cpp
-    /home/rian/Code/Projects/CoreNN/Source/Initializers/*.cu
-)
-
-add_executable(Evolution ${SOURCE_FILES})
-target_link_libraries(Evolution libale.so)
-target_link_libraries(Evolution lua5.4)
-target_link_libraries(Evolution libopenblas.a)
-target_link_libraries(Evolution libcudart.so)
-target_link_libraries(Evolution libcudadevrt.so)
-target_link_libraries(Evolution libcuda.so)
-target_link_libraries(Evolution libcublas.so)
-target_link_libraries(Evolution libcurand.so)
-target_link_libraries(Evolution libcudnn.so)
-target_link_libraries(Evolution libIL.so)
-target_link_libraries(Evolution libILU.so)
-target_link_libraries(Evolution libILUT.so)
-target_link_libraries(Evolution pthread)
-# target_link_libraries(Evolution libCoreNN.a)
-# target_link_libraries(ArcadeLearner libopenblas.a)
-# target_link_libraries(ArcadeLearner libOpenCL.so.1)
-# target_link_libraries(ArcadeLearner libclBLAS2.so)
-# # target_link_libraries(ArcadeLearner SDL2)
-# # target_link_libraries(ArcadeLearner SDL2main)
-# target_link_libraries(ArcadeLearner pthread)
-# target_compile_options(Evolution PUBLIC "-rdc=true")
-set_property(TARGET Evolution PROPERTY CUDA_STANDARD 11)
-target_compile_features(Evolution PUBLIC cxx_std_11)
-set_target_properties(Evolution PROPERTIES CUDA_SEPARABLE_COMPILATION ON)
+if(EVOLUTION_BUILD_ALE)
+    find_package(ZLIB REQUIRED)
+    set(ALE_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../Libraries/Arcade-Learning-Environment-0.6.0"
+        CACHE PATH "Path to the Arcade Learning Environment 0.6.0 sources")
+    option(EVOLUTION_USE_SDL "Enable legacy Atari display and sound (requires SDL 1.2)" OFF)
+    if(NOT EXISTS "${ALE_SOURCE_DIR}/src/ale_interface.hpp")
+        message(FATAL_ERROR "ALE 0.6.0 sources not found. Configure with -DALE_SOURCE_DIR=/path/to/Arcade-Learning-Environment-0.6.0")
+    endif()
+    function(add_evolution_ale)
+        set(CMAKE_POLICY_VERSION_MINIMUM 3.10)
+        set(CMAKE_POLICY_DEFAULT_CMP0077 NEW)
+        set(USE_SDL ${EVOLUTION_USE_SDL})
+        set(USE_RLGLUE OFF)
+        set(BUILD_EXAMPLES OFF)
+        set(BUILD_CPP_LIB ON)
+        set(BUILD_CLI OFF)
+        set(BUILD_C_LIB OFF)
+        add_subdirectory("${ALE_SOURCE_DIR}" "${CMAKE_CURRENT_BINARY_DIR}/ale" EXCLUDE_FROM_ALL)
+        set_target_properties(ale-lib PROPERTIES LIBRARY_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/ale")
+        target_include_directories(ale-lib SYSTEM PUBLIC "${ALE_SOURCE_DIR}/src")
+        target_link_libraries(ale-lib ZLIB::ZLIB)
+    endfunction()
+    add_evolution_ale()
+    add_executable(EvolutionALE Source/AleMain.cpp Source/AtariGame.cpp Source/EvolutionTraining.cpp
+        Source/GenericTrainer.cpp Source/SupervisedEnvironment.cpp Source/SupervisorTrainer.cpp Source/Tests.cpp)
+    target_link_libraries(EvolutionALE PRIVATE evolution_core ale-lib)
+    target_compile_options(EvolutionALE PRIVATE -Wall -Wextra)
+    set_target_properties(EvolutionALE PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${EVOLUTION_RUNTIME_DIR}")
+endif()
+# NetTraining.cpp remains a separate, unfinished CoreNN/CUDA experiment.

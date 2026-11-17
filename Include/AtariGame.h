@@ -1,4 +1,7 @@
+#pragma once
+
 #include "TicTacToe.h"
+#include <ale_interface.hpp>
 // #include <string>
 
 class AtariGame : public Game
@@ -17,6 +20,7 @@ public:
     bool is_over();
     byte_t* getState();
     int getStateSize();
+    int getActionCount() const override { return mALE->getMinimalActionSet().size(); }
     void restart();
     void softReset();
     void hardReset();

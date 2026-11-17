@@ -1,5 +1,7 @@
 #include "TicTacToe.h"
 
+#include <iostream>
+
 int TicTacToe::is_over() const
 {
 	if(mState[0]==mState[1] && mState[0]==mState[2] && mState[0]!=2)

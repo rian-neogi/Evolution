@@ -1,5 +1,7 @@
 #include "Rating.h"
 
+#include <cmath>
+
 int calculateELO(int elo1, int elo2, int res, int k_factor)
 {
     double qa = pow(10.0,elo1/400.0);

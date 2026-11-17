@@ -1,17 +1,20 @@
-#include "AtariGame.h"
+#pragma once
+
+#include "Game.h"
 
 class Environment 
 {
 public:
-	AtariGame* mGame;
+	Game* mGame;
 	Execution mExe;
 	Genotype* mPopulation;
 	int mPopulationSize;
+	int mMaxFrames = 10001;
 
 	Environment();
-	Environment(AtariGame* game, Genotype* pop, int pop_size);
+	Environment(Game* game, Genotype* pop, int pop_size);
 	virtual ~Environment();
 
-	virtual void init(AtariGame* game, Genotype* pop, int pop_size);
+	virtual void init(Game* game, Genotype* pop, int pop_size);
 	virtual int getFitness(int indi);
 };

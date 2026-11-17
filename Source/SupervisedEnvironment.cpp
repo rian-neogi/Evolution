@@ -20,17 +20,18 @@ SupervisedEnvironment::~SupervisedEnvironment()
 
 int SupervisedEnvironment::getFitness(int indi)
 {
+	auto* game = static_cast<AtariGame*>(mGame);
 	mGame->restart();
 	mExe.reset();
 	int gameReward = 0;
 	int supervisorReward = 0;
 	while (!mGame->is_over())
 	{
-		gameReward += mGame->mALE->act(PLAYER_A_FIRE);
+		gameReward += game->mALE->act(PLAYER_A_FIRE);
 		mExe.reset();
 		mExe.run_code(&mPopulation[indi], 0);
 
-		ActionVect vect = mGame->mALE->getMinimalActionSet();
+		ActionVect vect = game->mALE->getMinimalActionSet();
 		int size = vect.size();
 		gameReward += mGame->do_action(mExe.mRegisters[0] % size);
 

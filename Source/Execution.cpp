@@ -1,5 +1,9 @@
 #include "Execution.h"
 
+#include <fstream>
+#include <algorithm>
+#include <limits>
+
 void Execution::run_code(const Genotype *indi, int code_id)
 {
     // assert(code_id < indi->mGenes.size());
@@ -69,10 +73,10 @@ void Execution::run_code(const Genotype *indi, int code_id)
         }
         else if(type==INST_FUNC)
         {
-            // arg1 = arg1%indi->mGenes[code_id].mCode.size();
-            if(arg1 >= indi->mGenes[code_id].mCode.size())
+            // CALL addresses genes, independently of the caller's instruction count.
+            if(static_cast<std::size_t>(arg1) >= indi->mGenes.size())
             {
-                arg1 = indi->mGenes[code_id].mCode.size()-1;
+                arg1 = static_cast<int>(indi->mGenes.size() - 1);
             }
             run_code(indi, arg1);
         }
@@ -106,7 +110,8 @@ void Execution::run_code(const Genotype *indi, int code_id)
         {
             arg1 = arg1%mRegisterSize;
             arg2 = arg2%mRegisterSize;
-            mRegisters[arg1] += mRegisters[arg2];
+            mRegisters[arg1] = static_cast<int>(std::min<long long>(
+                std::numeric_limits<int>::max(), static_cast<long long>(mRegisters[arg1]) + mRegisters[arg2]));
         }
         else if(type==INST_SUB)
         {
@@ -121,7 +126,8 @@ void Execution::run_code(const Genotype *indi, int code_id)
         else if(type==INST_INC)
         {
             arg1 = arg1%mRegisterSize;
-            mRegisters[arg1] += arg2;
+            mRegisters[arg1] = static_cast<int>(std::min<long long>(
+                std::numeric_limits<int>::max(), static_cast<long long>(mRegisters[arg1]) + arg2));
         }
         else if(type==INST_DEC)
         {

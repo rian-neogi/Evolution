@@ -1,5 +1,7 @@
 #include "GenericTrainer.h"
 
+#include <cmath>
+
 void GenericTrainer::init(int pop, int survivors, const std::string& load_path, const std::string& save_path, int print_delay)
 {
 	mLoadPath = load_path;

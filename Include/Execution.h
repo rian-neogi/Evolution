@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Genotype.h"
+#include "Types.h"
 #include <string.h>
 
 extern "C"
